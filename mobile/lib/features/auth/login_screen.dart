@@ -69,7 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       final role = response['role'] as String? ?? 'User';
-      UserSession.current = response;
+      await UserSession.save(response);
 
       if (mounted) {
         // Show success animation or popup briefly
@@ -321,7 +321,22 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 28),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: GestureDetector(
+                            onTap: () => context.go('/forgot-password'),
+                            child: const Text(
+                              "Forgot Password?",
+                              style: TextStyle(
+                                color: Color(0xFF6366F1),
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
 
                         // Login Button
                         SizedBox(

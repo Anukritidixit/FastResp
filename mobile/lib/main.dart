@@ -3,16 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/routing/app_router.dart';
 import 'core/services/background_detector.dart';
-
+import 'features/auth/user_session.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   await initializeBackgroundService();
+  await UserSession.load();
 
   // Initialize Supabase with correct credentials
   await Supabase.initialize(
     url: 'https://crktpdsijoneauexgsoj.supabase.co',
-    publishableKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNya3RwZHNpam9uZWF1ZXhnc29qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MTg2MjUsImV4cCI6MjA5NzM5NDYyNX0.9gH1B6fsD4DRMXRw0Dis5MmwePiUX_CxCKm-6TQiATI',
+    publishableKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNya3RwZHNpam9uZWF1ZXhnc29qIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTgxODYyNSwiZXhwIjoyMDk3Mzk0NjI1fQ.rPPwpdTgMPJ6VJqWJ1gdbPoAnuocU4dXOnwmRfGrryw',
   );
 
   runApp(

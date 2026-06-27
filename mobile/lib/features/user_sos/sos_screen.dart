@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 import '../auth/user_session.dart';
+import '../core/utils/priority_engine.dart';
 
 class SosScreen extends StatefulWidget {
   const SosScreen({super.key});
@@ -28,6 +31,7 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
   int _countdownSeconds = 15;
   Timer? _accidentTimer;
   StreamSubscription<Position>? _positionStreamSubscription;
+  StreamSubscription<UserAccelerometerEvent>? _accelerometerSubscription;
 
   @override
   void initState() {
@@ -44,9 +48,25 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
   @override
   void dispose() {
     _pulseController.dispose();
+    _accelerometerSubscription?.cancel();
     _accidentTimer?.cancel();
     _unsubscribeFromIncident();
     super.dispose();
+  }
+
+  void _startSensorMonitoring() {
+    _accelerometerSubscription = userAccelerometerEventStream().listen((UserAccelerometerEvent event) {
+      if (_simulatingAccident || _activeIncident != null || _triggering) return;
+      
+      // Calculate magnitude of acceleration (without gravity)
+      double magnitude = sqrt(pow(event.x, 2) + pow(event.y, 2) + pow(event.z, 2));
+      
+      // Threshold for crash/impact (approx 3g to 4g force on user accel)
+      // 30 m/s^2 is a reasonable starting point for a sudden impact
+      if (magnitude > 30.0) {
+        _startAccidentSimulation();
+      }
+    });
   }
 
   void _loadUserSession() {
@@ -55,6 +75,7 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
         _userSession = UserSession.current;
       });
       _checkActiveIncident();
+      _startSensorMonitoring();
     } else {
       final sessionStr = localStorageGetSession();
       if (sessionStr != null) {
@@ -63,7 +84,44 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
           _userSession = sessionStr;
         });
         _checkActiveIncident();
+        _startSensorMonitoring();
       }
+    }
+
+    if (UserSession.profileCompletionPercentage < 100) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: const Color(0xFF151518),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: Colors.amber.withValues(alpha: 0.3))),
+              title: const Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: Colors.amber),
+                  SizedBox(width: 10),
+                  Text("Profile Incomplete", style: TextStyle(color: Colors.white, fontSize: 18)),
+                ],
+              ),
+              content: const Text("Your medical profile is incomplete. We highly recommend completing it to 100% to provide crucial information for emergency responders in case of an accident.", style: TextStyle(color: Colors.white70, fontSize: 14)),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text("Remind Me Later", style: TextStyle(color: Color(0xFF71717A))),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    context.push('/profile');
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6366F1), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                  child: const Text("Complete Profile", style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            ),
+          );
+        }
+      });
     }
   }
 
@@ -193,7 +251,12 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
         primaryContactStr = "${first['name']} (${first['relation']}) - ${first['phone']}";
       }
 
-      // 2. Create new incident (including primary contact info)
+      // 2. Priority Engine Calculation
+      final priorityData = PriorityEngine.calculatePriority(_userSession!, isHardwareImpact: type == 'impact');
+      final pScore = priorityData['score'];
+      final pLabel = priorityData['label'];
+
+      // 3. Create new incident (including primary contact info)
       final response = await _supabase
           .from('sos_incidents')
           .insert({
@@ -205,7 +268,9 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
             'longitude': lon,
             'accuracy': accuracy,
             'incident_type': 'Medical Emergency',
-            'severity': 'Critical',
+            'severity': pLabel,
+            'priority': pLabel,
+            'priority_score': pScore,
             'detection_type': type,
             'status': 'Pending',
             'emergency_contact': primaryContactStr
@@ -219,17 +284,21 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
 
       _subscribeToIncident(response['id']);
 
-      // 3. Automatically send simulated SMS to all emergency contacts
+      // 4. Automatically send simulated SMS to all emergency contacts
       for (final contact in contactsList) {
         final cName = contact['name'];
         final cPhone = contact['phone'];
         final cRelation = contact['relation'];
-        debugPrint("📱 SMS sent automatically to Emergency Contact [$cName ($cRelation) - $cPhone]: '🚨 EMERGENCY ALERT: SOS triggered by ${_userSession!['name']}. Location: ($lat, $lon). Help is being dispatched!'");
+        
+        final mapsLink = "https://www.google.com/maps/search/?api=1&query=$lat,$lon";
+        final timestamp = DateTime.now().toLocal().toString().split('.')[0];
+        
+        debugPrint("📱 SMS sent to [$cName ($cRelation) - $cPhone]: '🚨 EMERGENCY SOS from ${_userSession!['name']}. Time: $timestamp. Location: $mapsLink'");
         
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text("🚨 SMS sent to contact $cName ($cRelation): $cPhone"),
+              content: Text("🚨 SMS with Maps Link sent to $cName"),
               backgroundColor: const Color(0xFF6366F1),
               duration: const Duration(seconds: 4),
             ),
@@ -380,14 +449,29 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
                 ),
                 const SizedBox(height: 40),
 
-                // Accident Detection Simulator Controls
+                // Accident Detection Status
                 if (!_simulatingAccident && _activeIncident == null)
-                  TextButton.icon(
-                    onPressed: _startAccidentSimulation,
-                    icon: const Icon(Icons.sensors, color: Colors.amberAccent, size: 16),
-                    label: const Text(
-                      "Simulate Sudden Vehicle Impact",
-                      style: TextStyle(color: Colors.amberAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.amber.withValues(alpha: 0.2)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.sensors, color: Colors.amberAccent, size: 16),
+                        const SizedBox(width: 8),
+                        const Text(
+                          "Hardware Impact Detection Active",
+                          style: TextStyle(
+                            color: Colors.amberAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
 

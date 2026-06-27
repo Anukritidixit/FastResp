@@ -13,7 +13,7 @@ void onStart(ServiceInstance service) async {
 
   await Supabase.initialize(
     url: 'https://crktpdsijoneauexgsoj.supabase.co',
-    publishableKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNya3RwZHNpam9uZWF1ZXhnc29qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MTg2MjUsImV4cCI6MjA5NzM5NDYyNX0.9gH1B6fsD4DRMXRw0Dis5MmwePiUX_CxCKm-6TQiATI',
+    publishableKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNya3RwZHNpam9uZWF1ZXhnc29qIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTgxODYyNSwiZXhwIjoyMDk3Mzk0NjI1fQ.rPPwpdTgMPJ6VJqWJ1gdbPoAnuocU4dXOnwmRfGrryw',
   );
 
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
@@ -221,15 +221,16 @@ Future<void> initializeBackgroundService() async {
   await service.configure(
     androidConfiguration: AndroidConfiguration(
       onStart: onStart,
-      autoStart: true,
+      autoStart: false,
       isForegroundMode: true,
       notificationChannelId: 'sos_channel',
       initialNotificationTitle: 'ResQLink Active',
       initialNotificationContent: 'Monitoring for sudden impacts',
       foregroundServiceNotificationId: 888,
+      foregroundServiceTypes: [AndroidForegroundType.location],
     ),
     iosConfiguration: IosConfiguration(
-      autoStart: true,
+      autoStart: false,
       onForeground: onStart,
       onBackground: (ServiceInstance service) {
         return true;
@@ -237,5 +238,7 @@ Future<void> initializeBackgroundService() async {
     ),
   );
   
-  service.startService();
+  // We can't auto-start the service here on Android 14+ because 
+  // the user hasn't granted location permissions yet!
+  // service.startService();
 }

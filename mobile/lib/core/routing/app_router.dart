@@ -1,9 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../features/auth/user_session.dart';
 
 // Import Screens (Placeholder shells)
 import '../../features/auth/login_screen.dart';
 import '../../features/auth/register_screen.dart';
+import '../../features/auth/forgot_password_screen.dart';
 import '../../features/auth/profile_screen.dart';
 import '../../features/user_sos/sos_screen.dart';
 import '../../features/user_sos/nearby_incidents_page.dart';
@@ -21,6 +23,10 @@ final appRouterPrv = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterScreen(),
+      ),
+      GoRoute(
+        path: '/forgot-password',
+        builder: (context, state) => const ForgotPasswordScreen(),
       ),
       GoRoute(
         path: '/profile',
@@ -49,8 +55,21 @@ final appRouterPrv = Provider<GoRouter>((ref) {
     ],
     // Redirect logic to enforce session state
     redirect: (context, state) {
-      // Note: During local database-driven auth prototyping, we can skip standard Auth redirect 
-      // check if we want to test direct screens, but it's safe to allow navigation.
+      final isLoggedIn = UserSession.current != null;
+      final isGoingToAuth = state.matchedLocation == '/login' || state.matchedLocation == '/register' || state.matchedLocation == '/forgot-password';
+
+      if (!isLoggedIn && !isGoingToAuth) {
+        return '/login';
+      }
+      
+      if (isLoggedIn && isGoingToAuth) {
+        final role = UserSession.current?['role'] as String? ?? 'User';
+        if (role == 'Volunteer') {
+          return '/dashboard/volunteer';
+        } else {
+          return '/dashboard/user';
+        }
+      }
       return null;
     },
   );

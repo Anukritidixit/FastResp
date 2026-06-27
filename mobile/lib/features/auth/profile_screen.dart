@@ -29,7 +29,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   // Personal/Medical profile controllers
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _ageController = TextEditingController();
+  final _dobController = TextEditingController();
   final _genderController = TextEditingController();
   final _addressController = TextEditingController();
   final _allergiesController = TextEditingController();
@@ -69,11 +69,25 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     });
   }
 
+  int get _completionPercentage {
+    int total = 8;
+    int filled = 0;
+    if (_nameController.text.trim().isNotEmpty) filled++;
+    if (_phoneController.text.trim().isNotEmpty) filled++;
+    filled++; // Blood group always has a value
+    if (_dobController.text.trim().isNotEmpty) filled++;
+    if (_genderController.text.trim().isNotEmpty) filled++;
+    if (_addressController.text.trim().isNotEmpty) filled++;
+    if (_allergiesController.text.trim().isNotEmpty) filled++;
+    if (_conditionsController.text.trim().isNotEmpty) filled++;
+    return ((filled / total) * 100).round();
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
-    _ageController.dispose();
+    _dobController.dispose();
     _genderController.dispose();
     _addressController.dispose();
     _allergiesController.dispose();
@@ -125,7 +139,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       _nameController.text = user['name'] ?? '';
       _phoneController.text = user['phone'] ?? '';
       _selectedBloodGroup = user['blood_group'] ?? 'O+';
-      _ageController.text = user['age'] != null ? user['age'].toString() : '';
+      _dobController.text = user['dob'] ?? '';
       _genderController.text = user['gender'] ?? '';
       _addressController.text = user['address'] ?? '';
       _allergiesController.text = user['allergies'] ?? '';
@@ -194,8 +208,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     try {
       final name = _nameController.text.trim();
       final phone = _phoneController.text.trim();
-      final ageText = _ageController.text.trim();
-      final age = ageText.isNotEmpty ? int.tryParse(ageText) : null;
+      final dob = _dobController.text.trim();
       final gender = _genderController.text.trim();
       final address = _addressController.text.trim();
       final allergies = _allergiesController.text.trim();
@@ -207,7 +220,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         'name': name,
         'phone': phone,
         'blood_group': _selectedBloodGroup,
-        'age': age,
+        'dob': dob,
         'gender': gender,
         'address': address,
         'allergies': allergies,
@@ -248,7 +261,16 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     }
   }
 
-  Future<void> _addEmergencyContact() async {
+  Future<void> _addEmergencyContact({String? editContactId}) async {
+    if (editContactId == null && _contacts.length >= 5) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("You can only add up to 5 emergency contacts."), backgroundColor: Colors.amber),
+        );
+      }
+      return;
+    }
+    
     if (!_contactFormKey.currentState!.validate()) {
       return;
     }
@@ -258,12 +280,20 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     final contactRelation = _contactRelationController.text.trim();
 
     try {
-      await _supabase.from('emergency_contacts').insert({
-        'user_id': _userId,
-        'name': contactName,
-        'phone': contactPhone,
-        'relation': contactRelation,
-      });
+      if (editContactId != null) {
+        await _supabase.from('emergency_contacts').update({
+          'name': contactName,
+          'phone': contactPhone,
+          'relation': contactRelation,
+        }).eq('id', editContactId);
+      } else {
+        await _supabase.from('emergency_contacts').insert({
+          'user_id': _userId,
+          'name': contactName,
+          'phone': contactPhone,
+          'relation': contactRelation,
+        });
+      }
 
       _contactNameController.clear();
       _contactPhoneController.clear();
@@ -273,9 +303,9 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
         Navigator.pop(context); // Close add contact popup
         _fetchEmergencyContacts(); // Reload contacts list
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Emergency contact added successfully."),
-            backgroundColor: Color(0xFF6366F1),
+          SnackBar(
+            content: Text(editContactId != null ? "Contact updated successfully." : "Emergency contact added successfully."),
+            backgroundColor: const Color(0xFF6366F1),
           ),
         );
       }
@@ -306,7 +336,17 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     }
   }
 
-  void _showAddContactDialog() {
+  void _showAddContactDialog({Map<String, dynamic>? existingContact}) {
+    if (existingContact != null) {
+      _contactNameController.text = existingContact['name'];
+      _contactPhoneController.text = existingContact['phone'];
+      _contactRelationController.text = existingContact['relation'];
+    } else {
+      _contactNameController.clear();
+      _contactPhoneController.clear();
+      _contactRelationController.clear();
+    }
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -329,9 +369,9 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
               child: const Icon(Icons.add_moderator, color: Color(0xFF6366F1), size: 20),
             ),
             const SizedBox(width: 12),
-            const Text(
-              "Add Contact",
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+            Text(
+              existingContact != null ? "Edit Contact" : "Add Contact",
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
             ),
           ],
         ),
@@ -390,7 +430,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             child: const Text("CANCEL", style: TextStyle(color: Color(0xFF71717A), fontWeight: FontWeight.bold)),
           ),
           ElevatedButton.icon(
-            onPressed: _addEmergencyContact,
+            onPressed: () => _addEmergencyContact(editContactId: existingContact?['id']),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF6366F1),
               foregroundColor: Colors.white,
@@ -479,6 +519,56 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                         ),
                         const SizedBox(height: 16),
                       ],
+
+                      // Profile Completion Status
+                      if (_role == 'User')
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          margin: const EdgeInsets.only(bottom: 24),
+                          decoration: BoxDecoration(
+                            color: _completionPercentage == 100
+                                ? const Color(0xFF10B981).withValues(alpha: 0.1)
+                                : Colors.amber.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: _completionPercentage == 100
+                                  ? const Color(0xFF10B981).withValues(alpha: 0.2)
+                                  : Colors.amber.withValues(alpha: 0.2),
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    _completionPercentage == 100 ? "Profile Complete!" : "Profile Incomplete",
+                                    style: TextStyle(
+                                      color: _completionPercentage == 100 ? const Color(0xFF10B981) : Colors.amber,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  Text(
+                                    "$_completionPercentage%",
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: _completionPercentage / 100,
+                                  minHeight: 6,
+                                  backgroundColor: Colors.white.withValues(alpha: 0.1),
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    _completionPercentage == 100 ? const Color(0xFF10B981) : Colors.amber,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
 
                       // Tab selectors
                       Container(
@@ -623,12 +713,11 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildFieldLabel("AGE"),
+                      _buildFieldLabel("DATE OF BIRTH"),
                       TextFormField(
-                        controller: _ageController,
-                        keyboardType: TextInputType.number,
+                        controller: _dobController,
                         style: const TextStyle(color: Colors.white, fontSize: 14),
-                        decoration: _buildInputDecoration("Age", Icons.calendar_today_outlined),
+                        decoration: _buildInputDecoration("DD/MM/YYYY", Icons.calendar_today_outlined),
                       ),
                     ],
                   ),
@@ -755,7 +844,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
               ],
             ),
             ElevatedButton.icon(
-              onPressed: _showAddContactDialog,
+              onPressed: () => _showAddContactDialog(),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.12),
                 foregroundColor: const Color(0xFF6366F1),
@@ -900,16 +989,31 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                                   ],
                                 ),
                               ),
-                              IconButton(
-                                icon: Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFEF4444).withValues(alpha: 0.08),
-                                    borderRadius: BorderRadius.circular(8),
+                              Row(
+                                children: [
+                                  IconButton(
+                                    icon: Container(
+                                      padding: const EdgeInsets.all(6),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF3B82F6).withValues(alpha: 0.08),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: const Icon(Icons.edit_outlined, color: Color(0xFF93C5FD), size: 18),
+                                    ),
+                                    onPressed: () => _showAddContactDialog(existingContact: contact),
                                   ),
-                                  child: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFCA5A5), size: 18),
-                                ),
-                                onPressed: () => _deleteEmergencyContact(contact['id']),
+                                  IconButton(
+                                    icon: Container(
+                                      padding: const EdgeInsets.all(6),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFEF4444).withValues(alpha: 0.08),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFCA5A5), size: 18),
+                                    ),
+                                    onPressed: () => _deleteEmergencyContact(contact['id']),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
