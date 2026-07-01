@@ -5,8 +5,10 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
+import 'package:telephony/telephony.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../auth/user_session.dart';
-import '../core/utils/priority_engine.dart';
+import '../../core/utils/priority_engine.dart';
 
 class SosScreen extends StatefulWidget {
   const SosScreen({super.key});
@@ -26,12 +28,13 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
   Map<String, dynamic>? _activeIncident;
   RealtimeChannel? _realtimeChannel;
 
+  static bool _hasShownProfilePopup = false;
   bool _triggering = false;
   bool _simulatingAccident = false;
   int _countdownSeconds = 15;
   Timer? _accidentTimer;
   StreamSubscription<Position>? _positionStreamSubscription;
-  StreamSubscription<UserAccelerometerEvent>? _accelerometerSubscription;
+  StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
 
   @override
   void initState() {
@@ -43,6 +46,14 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
+
+    // Request SMS permission preemptively for the background SMS service
+    _requestSmsPermission();
+  }
+
+  Future<void> _requestSmsPermission() async {
+    final Telephony telephony = Telephony.instance;
+    await telephony.requestPhoneAndSmsPermissions;
   }
 
   @override
@@ -55,15 +66,16 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
   }
 
   void _startSensorMonitoring() {
-    _accelerometerSubscription = userAccelerometerEventStream().listen((UserAccelerometerEvent event) {
+    // Using accelerometerEventStream instead of userAccelerometerEventStream for 100% hardware compatibility
+    _accelerometerSubscription = accelerometerEventStream().listen((AccelerometerEvent event) {
       if (_simulatingAccident || _activeIncident != null || _triggering) return;
       
-      // Calculate magnitude of acceleration (without gravity)
+      // Calculate magnitude of raw acceleration (includes gravity ~9.8 m/s^2)
       double magnitude = sqrt(pow(event.x, 2) + pow(event.y, 2) + pow(event.z, 2));
       
-      // Threshold for crash/impact (approx 3g to 4g force on user accel)
-      // 30 m/s^2 is a reasonable starting point for a sudden impact
-      if (magnitude > 30.0) {
+      // Threshold for testing set to 25.0 m/s^2 (approx 1.5G of net impact force above gravity)
+      if (magnitude > 25.0) {
+        debugPrint("💥 High impact detected! Raw Magnitude: $magnitude");
         _startAccidentSimulation();
       }
     });
@@ -88,7 +100,8 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
       }
     }
 
-    if (UserSession.profileCompletionPercentage < 100) {
+    if (!_hasShownProfilePopup && UserSession.profileCompletionPercentage < 100) {
+      _hasShownProfilePopup = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           showDialog(
@@ -284,21 +297,37 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
 
       _subscribeToIncident(response['id']);
 
-      // 4. Automatically send simulated SMS to all emergency contacts
+      // 4. Automatically send real SMS to all emergency contacts
+      final Telephony telephony = Telephony.instance;
+      bool? hasSmsPermission = await telephony.requestPhoneAndSmsPermissions;
+
       for (final contact in contactsList) {
         final cName = contact['name'];
-        final cPhone = contact['phone'];
+        final cPhone = contact['phone'].toString();
         final cRelation = contact['relation'];
         
         final mapsLink = "https://www.google.com/maps/search/?api=1&query=$lat,$lon";
         final timestamp = DateTime.now().toLocal().toString().split('.')[0];
+        final smsBody = "🚨 EMERGENCY SOS from ${_userSession!['name']}. Time: $timestamp. Location: $mapsLink";
         
-        debugPrint("📱 SMS sent to [$cName ($cRelation) - $cPhone]: '🚨 EMERGENCY SOS from ${_userSession!['name']}. Time: $timestamp. Location: $mapsLink'");
+        debugPrint("📱 SMS sent to [$cName ($cRelation) - $cPhone]: '$smsBody'");
+        
+        if (hasSmsPermission == true) {
+          try {
+            telephony.sendSms(
+              to: cPhone, 
+              message: smsBody,
+              isMultipart: true, // Required for texts over 70 chars with Emojis
+            );
+          } catch (e) {
+            debugPrint("Failed to send real background SMS to $cPhone: $e");
+          }
+        }
         
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text("🚨 SMS with Maps Link sent to $cName"),
+              content: Text(hasSmsPermission == true ? "🚨 Real SMS sent to $cName" : "🚨 Simulated SMS sent to $cName (No Permission)"),
               backgroundColor: const Color(0xFF6366F1),
               duration: const Duration(seconds: 4),
             ),
@@ -400,7 +429,10 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
           ),
           IconButton(
             icon: const Icon(Icons.logout, color: Color(0xFFA1A1AA)), // zinc400
-            onPressed: () => context.go('/login'),
+            onPressed: () async {
+              await UserSession.clear();
+              if (mounted) context.go('/login');
+            },
           )
         ],
       ),

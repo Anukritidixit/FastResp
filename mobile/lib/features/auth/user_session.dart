@@ -23,4 +23,22 @@ class UserSession {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('resqlink_user_session');
   }
+
+  static int get profileCompletionPercentage {
+    if (current == null) return 0;
+    
+    int total = 8;
+    int filled = 0;
+    
+    if ((current!['name'] ?? '').toString().trim().isNotEmpty) filled++;
+    if ((current!['phone'] ?? '').toString().trim().isNotEmpty) filled++;
+    filled++; // blood group always has a value
+    if ((current!['dob'] ?? '').toString().trim().isNotEmpty) filled++;
+    if ((current!['gender'] ?? '').toString().trim().isNotEmpty) filled++;
+    if ((current!['address'] ?? '').toString().trim().isNotEmpty) filled++;
+    if ((current!['allergies'] ?? '').toString().trim().isNotEmpty) filled++;
+    if ((current!['medical_conditions'] ?? '').toString().trim().isNotEmpty) filled++;
+    
+    return ((filled / total) * 100).round();
+  }
 }
