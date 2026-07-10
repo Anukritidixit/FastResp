@@ -23,7 +23,6 @@
 # misc
 .DS_Store
 *.pem
-*.log
 
 # debug
 npm-debug.log*
@@ -41,5 +40,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Mobile android ignores
-mobile/lib/oracleJdk-26/
+.vercel
