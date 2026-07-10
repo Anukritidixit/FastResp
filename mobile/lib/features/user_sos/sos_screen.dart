@@ -318,6 +318,23 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
               to: cPhone, 
               message: smsBody,
               isMultipart: true, // Required for texts over 70 chars with Emojis
+              statusListener: (SendStatus status) {
+                String statusMsg = "";
+                if (status == SendStatus.SENT) {
+                  statusMsg = "🚨 SMS to $cName sent successfully!";
+                } else {
+                  statusMsg = "❌ SMS to $cName failed to send ($status). Check balance/signal.";
+                }
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(statusMsg),
+                      backgroundColor: status == SendStatus.SENT ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
+              },
             );
           } catch (e) {
             debugPrint("Failed to send real background SMS to $cPhone: $e");
