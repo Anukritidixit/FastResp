@@ -11,6 +11,8 @@ export interface SosIncident {
   assignedVolunteer: string | null;
   incidentType: string;
   severity: 'Critical' | 'High' | 'Medium' | 'Low';
+  priority?: string;
+  priorityScore?: number;
   emergencyContact: string;
   detectionType?: 'manual' | 'impact' | 'fall' | 'speed_drop';
 }

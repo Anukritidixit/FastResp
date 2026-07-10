@@ -30,6 +30,8 @@ const mapDbIncident = (inc: JoinedDbIncident): SosIncident => {
     assignedVolunteer: volunteerUser.name || null,
     incidentType: inc.incident_type,
     severity: inc.severity,
+    priority: inc.priority || inc.severity,
+    priorityScore: inc.priority_score || 0,
     emergencyContact: inc.emergency_contact || '',
     detectionType: inc.detection_type || 'manual',
   };
@@ -69,6 +71,22 @@ export async function updateIncidentStatus(
     throw error;
   }
   
+  return true;
+}
+
+export async function updateIncidentPriority(
+  incidentId: string, 
+  priority: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from('sos_incidents')
+    .update({ priority })
+    .eq('id', incidentId);
+  
+  if (error) {
+    console.error('Error updating priority:', error);
+    throw error;
+  }
   return true;
 }
 

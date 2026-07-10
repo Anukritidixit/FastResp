@@ -49,6 +49,8 @@ export interface DbSosIncident {
   assigned_volunteer_id?: string | null;
   incident_type: string;
   severity: 'Critical' | 'High' | 'Medium' | 'Low';
+  priority?: string;
+  priority_score?: number;
   emergency_contact?: string;
   detection_type: 'manual' | 'impact' | 'fall' | 'speed_drop';
 }

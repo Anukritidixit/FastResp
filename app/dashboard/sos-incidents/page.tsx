@@ -15,7 +15,8 @@ import {
 import { 
   getIncidents, 
   updateIncidentStatus, 
-  assignVolunteer, 
+  assignVolunteer,
+  updateIncidentPriority,
   SosIncident 
 } from "@/services/supabase/sos-incidents";
 import { getVolunteers, VolunteerData } from "@/services/supabase/volunteers";
@@ -131,6 +132,16 @@ export default function SosIncidentsPage() {
   };
 
   // Actions
+  const handleUpdatePriority = async (id: string, priority: string) => {
+    try {
+      await updateIncidentPriority(id, priority);
+      await fetchIncidents();
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "An error occurred";
+      alert("Failed to override priority: " + errMsg);
+    }
+  };
+
   const handleAssignVolunteer = async (volId: string) => {
     if (!activeIncident) return;
     try {
@@ -189,7 +200,7 @@ export default function SosIncidentsPage() {
                 <tr className="border-b border-white/10 bg-white/2 text-xs font-semibold uppercase tracking-wider text-zinc-400 sticky top-0 z-10 backdrop-blur-xl">
                   <th className="px-6 py-3">Case ID</th>
                   <th className="px-6 py-3">Victim</th>
-                  <th className="px-6 py-3">Severity</th>
+                  <th className="px-6 py-3">Priority</th>
                   <th className="px-6 py-3">Status</th>
                   <th className="px-6 py-3">Assigned Responder</th>
                 </tr>
@@ -229,9 +240,12 @@ export default function SosIncidentsPage() {
                         <div className="text-[10px] text-zinc-500 font-mono">Started: {inc.createdTime}</div>
                       </td>
                       <td className="whitespace-nowrap px-6 py-4">
-                        <span className={`rounded-lg px-2 py-0.5 text-xs ${getSeverityStyle(inc.severity)}`}>
-                          {inc.severity}
+                        <span className={`rounded-lg px-2 py-0.5 text-xs ${getSeverityStyle(inc.priority || inc.severity)}`}>
+                          {inc.priority || inc.severity}
                         </span>
+                        {inc.priorityScore !== undefined && (
+                          <div className="text-[10px] text-zinc-500 mt-1 font-mono">Score: {inc.priorityScore}</div>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-6 py-4">
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${getStatusStyle(inc.status)}`}>
@@ -332,10 +346,18 @@ export default function SosIncidentsPage() {
                       </span>
                     </div>
                     <div className="space-y-1">
-                      <p className="text-zinc-500 font-semibold uppercase">Incident Severity</p>
-                      <span className={`inline-flex items-center rounded-lg px-2 py-0.5 font-bold text-[9px] bg-zinc-850 text-zinc-300 border border-white/10`}>
-                        {activeIncident.severity}
-                      </span>
+                      <p className="text-zinc-500 font-semibold uppercase">Engine Priority (Score: {activeIncident.priorityScore})</p>
+                      <select
+                        value={activeIncident.priority || activeIncident.severity}
+                        onChange={(e) => handleUpdatePriority(activeIncident.id, e.target.value)}
+                        disabled={activeIncident.status === "Resolved" || activeIncident.status === "Cancelled"}
+                        className="bg-black/30 border border-white/10 rounded-lg px-2 py-1 text-xs font-bold text-white outline-none focus:border-indigo-500 disabled:opacity-40"
+                      >
+                        <option value="Critical">Critical</option>
+                        <option value="High">High</option>
+                        <option value="Medium">Medium</option>
+                        <option value="Low">Low</option>
+                      </select>
                     </div>
                     <div className="col-span-2 space-y-1">
                       <p className="text-zinc-500 font-semibold uppercase">Emergency Contact</p>
