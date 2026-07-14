@@ -314,7 +314,7 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
         
         final mapsLink = "https://www.google.com/maps/search/?api=1&query=$lat,$lon";
         final timestamp = DateTime.now().toLocal().toString().split('.')[0];
-        final smsBody = "🚨 EMERGENCY SOS from ${_userSession!['name']}. Time: $timestamp. Location: $mapsLink";
+        final smsBody = "EMERGENCY SOS from ${_userSession!['name']}. Time: $timestamp. Location: $mapsLink";
         
         debugPrint("📱 SMS sent to [$cName ($cRelation) - $cPhone]: '$smsBody'");
         
