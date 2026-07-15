@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
@@ -35,9 +38,140 @@ void onStart(ServiceInstance service) async {
   int countdown = 20;
   Timer? countdownTimer;
 
-  service.on('cancelSOS').listen((event) {
+  // Initialize Speech to Text and Text to Speech
+  final SpeechToText speech = SpeechToText();
+  final FlutterTts tts = FlutterTts();
+  bool speechInitialized = false;
+
+  try {
+    speechInitialized = await speech.initialize(
+      onError: (val) => debugPrint('Background Speech Error: $val'),
+      onStatus: (val) => debugPrint('Background Speech Status: $val'),
+    );
+  } catch (e) {
+    debugPrint("Failed to initialize background SpeechToText: $e");
+  }
+
+  final List<String> emergencyPhrases = [
+    'help',
+    'help me',
+    'sos',
+    'somebody help',
+    'call the police',
+    'बचाओ',
+    'मदद',
+    'हेल्प',
+    'पुलिस',
+    'मुझे बचाओ',
+    'bachao',
+    'madad',
+    'mujhe bachao'
+  ];
+
+  final List<String> cancelPhrases = [
+    'cancel',
+    'safe',
+    'cancel sos',
+    'stop',
+    'मार्क सेफ'
+  ];
+
+  void onVoiceResult(String words) async {
+    if (isCountingDown) {
+      for (final p in cancelPhrases) {
+        if (words.toLowerCase().contains(p)) {
+          service.invoke('cancelSOS');
+          await tts.speak("SOS cancelled. You are marked as safe.");
+          break;
+        }
+      }
+      return;
+    }
+
+    for (final phrase in emergencyPhrases) {
+      if (words.toLowerCase().contains(phrase)) {
+        isCountingDown = true;
+        countdown = 10;
+
+        await speech.stop();
+        await tts.speak("Emergency phrase detected. Sending SOS in 10 seconds.");
+
+        countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+          if (countdown > 0) {
+            final AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+              'sos_channel',
+              'SOS Alerts',
+              channelDescription: 'Emergency SOS countdown alerts',
+              importance: Importance.max,
+              priority: Priority.high,
+              ticker: 'ticker',
+              playSound: true,
+              onlyAlertOnce: true,
+              sound: const UriAndroidNotificationSound('content://settings/system/alarm_alert'),
+              vibrationPattern: Int64List.fromList([0, 1000, 500, 1000]),
+              actions: const [
+                AndroidNotificationAction('cancel_sos', 'I AM SAFE - CANCEL'),
+              ],
+              ongoing: true,
+            );
+            final NotificationDetails platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
+            
+            await flutterLocalNotificationsPlugin.show(
+              id: 888,
+              title: 'Emergency Phrase Detected!',
+              body: 'Are you okay? Automatic SOS in $countdown seconds.',
+              notificationDetails: platformChannelSpecifics,
+              payload: 'cancel_sos',
+            );
+
+            if (!speech.isListening) {
+              await speech.listen(
+                onResult: (res) => onVoiceResult(res.recognizedWords),
+                listenFor: const Duration(seconds: 5),
+                pauseFor: const Duration(seconds: 2),
+                partialResults: true,
+              );
+            }
+
+            countdown--;
+          } else {
+            timer.cancel();
+            isCountingDown = false;
+            await speech.stop();
+            await flutterLocalNotificationsPlugin.cancel(id: 888);
+            await triggerSosBackground(
+              flutterLocalNotificationsPlugin,
+              type: 'voice',
+              incidentType: 'Voice Activation',
+            );
+          }
+        });
+        break;
+      }
+    }
+  }
+
+  Timer.periodic(const Duration(seconds: 4), (timer) async {
+    if (speechInitialized && !isCountingDown && !speech.isListening) {
+      try {
+        await speech.listen(
+          onResult: (res) => onVoiceResult(res.recognizedWords),
+          listenFor: const Duration(seconds: 30),
+          pauseFor: const Duration(seconds: 10),
+          partialResults: true,
+        );
+      } catch (e) {
+        debugPrint("Error restarting background speech listen: $e");
+      }
+    }
+  });
+
+  service.on('cancelSOS').listen((event) async {
     isCountingDown = false;
     countdownTimer?.cancel();
+    try {
+      await speech.stop();
+    } catch (_) {}
     flutterLocalNotificationsPlugin.cancel(id: 888);
   });
 
@@ -59,6 +193,9 @@ void onStart(ServiceInstance service) async {
             importance: Importance.max,
             priority: Priority.high,
             ticker: 'ticker',
+            playSound: true,
+            onlyAlertOnce: true,
+            sound: UriAndroidNotificationSound('content://settings/system/alarm_alert'),
             actions: [
               AndroidNotificationAction('cancel_sos', 'I AM SAFE - CANCEL'),
             ],
@@ -138,7 +275,7 @@ void onStart(ServiceInstance service) async {
   });
 }
 
-Future<void> triggerSosBackground(FlutterLocalNotificationsPlugin notificationsPlugin) async {
+Future<void> triggerSosBackground(FlutterLocalNotificationsPlugin notificationsPlugin, {String type = 'automatic_sensor', String incidentType = 'Vehicle Collision'}) async {
   try {
     final supabase = Supabase.instance.client;
     
@@ -173,9 +310,9 @@ Future<void> triggerSosBackground(FlutterLocalNotificationsPlugin notificationsP
       'latitude': lat,
       'longitude': lon,
       'accuracy': accuracy,
-      'incident_type': 'Vehicle Collision',
+      'incident_type': incidentType,
       'severity': 'Critical',
-      'detection_type': 'automatic_sensor',
+      'detection_type': type,
       'status': 'Pending',
       'emergency_contact': primaryContactStr
     }).select().single();
@@ -227,7 +364,7 @@ Future<void> initializeBackgroundService() async {
       initialNotificationTitle: 'ResQLink Active',
       initialNotificationContent: 'Monitoring for sudden impacts',
       foregroundServiceNotificationId: 888,
-      foregroundServiceTypes: [AndroidForegroundType.location],
+      foregroundServiceTypes: [AndroidForegroundType.location, AndroidForegroundType.microphone],
     ),
     iosConfiguration: IosConfiguration(
       autoStart: false,

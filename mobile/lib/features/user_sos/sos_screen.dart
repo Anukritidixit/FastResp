@@ -7,6 +7,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:telephony/telephony.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../auth/user_session.dart';
 import '../../core/utils/priority_engine.dart';
 
@@ -36,6 +38,8 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
   StreamSubscription<Position>? _positionStreamSubscription;
   StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
 
+  final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
+
   @override
   void initState() {
     super.initState();
@@ -47,13 +51,58 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
 
-    // Request SMS permission preemptively for the background SMS service
-    _requestSmsPermission();
+    // Initialize local notifications for foreground audio warning alerts
+    const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
+    _notificationsPlugin.initialize(
+      settings: initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        if (response.payload == 'cancel_sos') {
+          _cancelAccidentSimulation();
+        }
+      },
+    );
+
+    // Request permissions preemptively and start background detector service
+    _requestPermissionsAndStartBackgroundService();
   }
 
-  Future<void> _requestSmsPermission() async {
-    final Telephony telephony = Telephony.instance;
-    await telephony.requestPhoneAndSmsPermissions;
+  Future<void> _requestPermissionsAndStartBackgroundService() async {
+    try {
+      // 1. Request SMS permission
+      final Telephony telephony = Telephony.instance;
+      await telephony.requestPhoneAndSmsPermissions;
+
+      // Request Microphone permission (for Voice SOS detection)
+      if (await Permission.microphone.isDenied) {
+        await Permission.microphone.request();
+      }
+
+      // 2. Request Notification permission (essential for Android 13+)
+      if (await Permission.notification.isDenied) {
+        await Permission.notification.request();
+      }
+
+      // 3. Request Foreground Location permission
+      if (await Permission.location.isDenied) {
+        await Permission.location.request();
+      }
+
+      // 4. Request Background Location permission (required for background execution)
+      if (await Permission.location.isGranted && await Permission.locationAlways.isDenied) {
+        await Permission.locationAlways.request();
+      }
+
+      // 5. Start background service if permissions are granted
+      if (await Permission.location.isGranted || await Permission.locationAlways.isGranted) {
+        final service = FlutterBackgroundService();
+        if (!await service.isRunning()) {
+          await service.startService();
+        }
+      }
+    } catch (e) {
+      debugPrint("Failed to request permissions or start background service: $e");
+    }
   }
 
   @override
@@ -236,6 +285,8 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
   Future<void> _triggerSos({String type = 'manual'}) async {
     if (_userSession == null || _triggering) return;
 
+    _cancelAccidentNotification();
+
     setState(() {
       _triggering = true;
     });
@@ -378,11 +429,41 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
     }
   }
 
+  Future<void> _showAccidentNotification() async {
+    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'sos_channel',
+      'SOS Alerts',
+      channelDescription: 'Emergency SOS countdown alerts',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+      onlyAlertOnce: true,
+      sound: UriAndroidNotificationSound('content://settings/system/alarm_alert'),
+      actions: [
+        AndroidNotificationAction('cancel_sos', 'I AM SAFE - CANCEL'),
+      ],
+    );
+    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+    await _notificationsPlugin.show(
+      id: 777,
+      title: 'Possible Accident Detected!',
+      body: 'Are you okay? Automatic SOS initiating.',
+      notificationDetails: platformDetails,
+      payload: 'cancel_sos',
+    );
+  }
+
+  Future<void> _cancelAccidentNotification() async {
+    await _notificationsPlugin.cancel(id: 777);
+  }
+
   void _startAccidentSimulation() {
     setState(() {
       _simulatingAccident = true;
       _countdownSeconds = 15;
     });
+
+    _showAccidentNotification();
 
     _accidentTimer?.cancel();
     _accidentTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -392,6 +473,7 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
         });
       } else {
         timer.cancel();
+        _cancelAccidentNotification();
         _triggerSos(type: 'impact');
       }
     });
@@ -399,6 +481,7 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
 
   void _cancelAccidentSimulation() {
     _accidentTimer?.cancel();
+    _cancelAccidentNotification();
     setState(() {
       _simulatingAccident = false;
     });
