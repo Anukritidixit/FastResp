@@ -336,7 +336,10 @@ class _VolunteerDashboardState extends State<VolunteerDashboard> {
           ),
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Color(0xFFA1A1AA)),
-            onPressed: () => context.go('/login'),
+            onPressed: () async {
+              await UserSession.clear();
+              if (mounted) context.go('/login');
+            },
           )
         ],
       ),

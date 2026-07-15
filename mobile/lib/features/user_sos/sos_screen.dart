@@ -5,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
-import 'package:telephony/telephony.dart';
+import 'package:sms_sender_background/sms_sender.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -69,9 +69,12 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
 
   Future<void> _requestPermissionsAndStartBackgroundService() async {
     try {
-      // 1. Request SMS permission
-      final Telephony telephony = Telephony.instance;
-      await telephony.requestPhoneAndSmsPermissions;
+      // 1. Request SMS permission using SmsSender
+      final smsSender = SmsSender();
+      bool hasPermission = await smsSender.checkSmsPermission();
+      if (!hasPermission) {
+        await smsSender.requestSmsPermission();
+      }
 
       // Request Microphone permission (for Voice SOS detection)
       if (await Permission.microphone.isDenied) {
@@ -349,8 +352,11 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
       _subscribeToIncident(response['id']);
 
       // 4. Automatically send real SMS to all emergency contacts
-      final Telephony telephony = Telephony.instance;
-      bool? hasSmsPermission = await telephony.requestPhoneAndSmsPermissions;
+      final smsSender = SmsSender();
+      bool hasSmsPermission = await smsSender.checkSmsPermission();
+      if (!hasSmsPermission) {
+        hasSmsPermission = await smsSender.requestSmsPermission();
+      }
 
       for (final contact in contactsList) {
         final cName = contact['name'];
@@ -359,43 +365,36 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
         
         final mapsLink = "https://www.google.com/maps/search/?api=1&query=$lat,$lon";
         final timestamp = DateTime.now().toLocal().toString().split('.')[0];
-        final smsBody = "🚨 EMERGENCY SOS from ${_userSession!['name']}. Time: $timestamp. Location: $mapsLink";
+        final smsBody = "EMERGENCY SOS from ${_userSession!['name']}. Time: $timestamp. Location: $mapsLink";
         
         debugPrint("📱 SMS sent to [$cName ($cRelation) - $cPhone]: '$smsBody'");
         
-        if (hasSmsPermission == true) {
+        if (hasSmsPermission) {
           try {
-            telephony.sendSms(
-              to: cPhone, 
+            final bool success = await smsSender.sendSms(
+              phoneNumber: cPhone,
               message: smsBody,
-              isMultipart: true, // Required for texts over 70 chars with Emojis
-              statusListener: (SendStatus status) {
-                String statusMsg = "";
-                if (status == SendStatus.SENT) {
-                  statusMsg = "🚨 SMS to $cName sent successfully!";
-                } else {
-                  statusMsg = "❌ SMS to $cName failed to send ($status). Check balance/signal.";
-                }
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(statusMsg),
-                      backgroundColor: status == SendStatus.SENT ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-                      duration: const Duration(seconds: 4),
-                    ),
-                  );
-                }
-              },
             );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(success 
+                    ? "🚨 SMS to $cName sent successfully!" 
+                    : "❌ SMS to $cName failed to send. Check balance/signal."),
+                  backgroundColor: success ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                  duration: const Duration(seconds: 4),
+                ),
+              );
+            }
           } catch (e) {
             debugPrint("Failed to send real background SMS to $cPhone: $e");
           }
         }
         
-        if (mounted) {
+        if (mounted && !hasSmsPermission) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(hasSmsPermission == true ? "🚨 Real SMS sent to $cName" : "🚨 Simulated SMS sent to $cName (No Permission)"),
+              content: Text("🚨 Simulated SMS sent to $cName (No Permission)"),
               backgroundColor: const Color(0xFF6366F1),
               duration: const Duration(seconds: 4),
             ),

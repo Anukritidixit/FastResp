@@ -48,6 +48,7 @@ dependencies:
   telephony: ^0.2.0
   speech_to_text: ^7.4.0
   flutter_tts: ^4.2.5
+  sms_sender_background: ^1.0.7
 
 dev_dependencies:
   flutter_test:
