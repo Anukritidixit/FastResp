@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
@@ -76,6 +77,8 @@ void onStart(ServiceInstance service) async {
     'मार्क सेफ'
   ];
 
+  String? customVoicePhrase;
+
   void onVoiceResult(String words) async {
     if (isCountingDown) {
       for (final p in cancelPhrases) {
@@ -88,7 +91,12 @@ void onStart(ServiceInstance service) async {
       return;
     }
 
-    for (final phrase in emergencyPhrases) {
+    final matchPhrases = List<String>.from(emergencyPhrases);
+    if (customVoicePhrase != null && customVoicePhrase!.trim().isNotEmpty) {
+      matchPhrases.add(customVoicePhrase!.trim().toLowerCase());
+    }
+
+    for (final phrase in matchPhrases) {
       if (words.toLowerCase().contains(phrase)) {
         isCountingDown = true;
         countdown = 10;
@@ -99,9 +107,9 @@ void onStart(ServiceInstance service) async {
         countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
           if (countdown > 0) {
             final AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
-              'sos_channel',
-              'SOS Alerts',
-              channelDescription: 'Emergency SOS countdown alerts',
+              'emergency_critical_channel',
+              'Emergency Alerts',
+              channelDescription: 'Emergency SOS countdown alerts with audio sirens',
               importance: Importance.max,
               priority: Priority.high,
               ticker: 'ticker',
@@ -152,6 +160,11 @@ void onStart(ServiceInstance service) async {
   }
 
   Timer.periodic(const Duration(seconds: 4), (timer) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      customVoicePhrase = prefs.getString('custom_voice_sos_phrase');
+    } catch (_) {}
+
     if (speechInitialized && !isCountingDown && !speech.isListening) {
       try {
         await speech.listen(
@@ -187,9 +200,9 @@ void onStart(ServiceInstance service) async {
       countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
         if (countdown > 0) {
           const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
-            'sos_channel',
-            'SOS Alerts',
-            channelDescription: 'Emergency SOS countdown alerts',
+            'emergency_critical_channel',
+            'Emergency Alerts',
+            channelDescription: 'Emergency SOS countdown alerts with audio sirens',
             importance: Importance.max,
             priority: Priority.high,
             ticker: 'ticker',
@@ -346,10 +359,11 @@ Future<void> initializeBackgroundService() async {
   final service = FlutterBackgroundService();
 
   const AndroidNotificationChannel channel = AndroidNotificationChannel(
-    'sos_channel',
-    'SOS Alerts',
-    description: 'Emergency SOS countdown alerts',
+    'emergency_critical_channel',
+    'Emergency Alerts',
+    description: 'Emergency SOS countdown alerts with audio sirens',
     importance: Importance.max,
+    playSound: true,
   );
 
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
@@ -360,7 +374,7 @@ Future<void> initializeBackgroundService() async {
       onStart: onStart,
       autoStart: false,
       isForegroundMode: true,
-      notificationChannelId: 'sos_channel',
+      notificationChannelId: 'emergency_critical_channel',
       initialNotificationTitle: 'ResQLink Active',
       initialNotificationContent: 'Monitoring for sudden impacts',
       foregroundServiceNotificationId: 888,

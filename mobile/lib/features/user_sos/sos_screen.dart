@@ -430,9 +430,9 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
 
   Future<void> _showAccidentNotification() async {
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'sos_channel',
-      'SOS Alerts',
-      channelDescription: 'Emergency SOS countdown alerts',
+      'emergency_critical_channel',
+      'Emergency Alerts',
+      channelDescription: 'Emergency SOS countdown alerts with audio sirens',
       importance: Importance.max,
       priority: Priority.high,
       playSound: true,

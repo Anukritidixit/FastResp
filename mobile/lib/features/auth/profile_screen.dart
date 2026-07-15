@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'user_session.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -55,13 +57,21 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   final _contactPhoneController = TextEditingController();
   final _contactRelationController = TextEditingController();
 
+  // Voice SOS phrase state
+  final SpeechToText _speech = SpeechToText();
+  bool _speechAvailable = false;
+  bool _isRecordingVoice = false;
+  final _phraseController = TextEditingController();
+
   late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
     _loadSession();
-    _tabController = TabController(length: _role == 'User' ? 3 : 2, vsync: this);
+    _loadVoicePhrase();
+    _initSpeech();
+    _tabController = TabController(length: _role == 'User' ? 4 : 2, vsync: this);
     _tabController.addListener(() {
       if (mounted && !_tabController.indexIsChanging) {
         setState(() {});
@@ -98,6 +108,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     _contactNameController.dispose();
     _contactPhoneController.dispose();
     _contactRelationController.dispose();
+    _phraseController.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -595,6 +606,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                             const Tab(text: "Personal"),
                             if (_role == 'User') const Tab(text: "Medical"),
                             if (_role == 'User') const Tab(text: "Contacts"),
+                            if (_role == 'User') const Tab(text: "Voice SOS"),
                             if (_role == 'Volunteer') const Tab(text: "Responder Details"),
                           ],
                         ),
@@ -617,6 +629,9 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                               // Tab 3 (Conditional)
                               if (_role == 'User') _buildContactsTab(),
 
+                              // Tab 4 (Conditional)
+                              if (_role == 'User') _buildVoiceSosTab(),
+
                               // Tab 2 (Volunteer Specific details)
                               if (_role == 'Volunteer') _buildVolunteerTab(),
                             ],
@@ -625,7 +640,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                       ),
 
                       // Save Changes floating button at bottom
-                      if (_tabController.index != 2 || _role != 'User')
+                      if ((_tabController.index != 2 && _tabController.index != 3) || _role != 'User')
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 20),
                           child: SizedBox(
@@ -1180,6 +1195,180 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: Color(0xFF6366F1), width: 1.2),
+      ),
+    );
+  }
+
+  Future<void> _loadVoicePhrase() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _phraseController.text = prefs.getString('custom_voice_sos_phrase') ?? '';
+    });
+  }
+
+  Future<void> _initSpeech() async {
+    try {
+      bool available = await _speech.initialize(
+        onError: (val) => debugPrint('Profile Speech Error: $val'),
+        onStatus: (val) => debugPrint('Profile Speech Status: $val'),
+      );
+      setState(() {
+        _speechAvailable = available;
+      });
+    } catch (e) {
+      debugPrint("Failed to initialize speech in Profile screen: $e");
+    }
+  }
+
+  Future<void> _saveVoicePhrase() async {
+    final phrase = _phraseController.text.trim();
+    if (phrase.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Voice phrase cannot be empty.")),
+      );
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('custom_voice_sos_phrase', phrase);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Custom Voice SOS phrase saved successfully!"),
+          backgroundColor: Color(0xFF10B981),
+        ),
+      );
+    }
+  }
+
+  void _startRecordingPhrase() async {
+    if (_speechAvailable && !_isRecordingVoice) {
+      setState(() {
+        _isRecordingVoice = true;
+      });
+      await _speech.listen(
+        onResult: (res) {
+          setState(() {
+            _phraseController.text = res.recognizedWords;
+          });
+        },
+      );
+    }
+  }
+
+  void _stopRecordingPhrase() async {
+    if (_isRecordingVoice) {
+      await _speech.stop();
+      setState(() {
+        _isRecordingVoice = false;
+      });
+    }
+  }
+
+  Widget _buildVoiceSosTab() {
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.02),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Setup Your Safety Code Word",
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "Recording a custom phrase lets you trigger a background SOS simply by saying it out loud.",
+              style: TextStyle(color: Color(0xFF71717A), fontSize: 12, height: 1.4),
+            ),
+            const Divider(height: 32, color: Colors.white10),
+            
+            _buildFieldLabel("CUSTOM VOICE SOS PHRASE"),
+            TextFormField(
+              controller: _phraseController,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              decoration: _buildInputDecoration("e.g. My code word", Icons.voice_over_off_outlined),
+            ),
+            const SizedBox(height: 24),
+            
+            // Microphone Recording Trigger Button
+            Center(
+              child: GestureDetector(
+                onTapDown: (_) => _startRecordingPhrase(),
+                onTapUp: (_) => _stopRecordingPhrase(),
+                onTapCancel: () => _stopRecordingPhrase(),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _isRecordingVoice 
+                        ? const Color(0xFFEF4444).withValues(alpha: 0.15) 
+                        : const Color(0xFF6366F1).withValues(alpha: 0.08),
+                    border: Border.all(
+                      color: _isRecordingVoice 
+                          ? const Color(0xFFEF4444) 
+                          : const Color(0xFF6366F1).withValues(alpha: 0.3),
+                      width: 2,
+                    ),
+                    boxShadow: _isRecordingVoice ? [
+                      BoxShadow(
+                        color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+                        blurRadius: 15,
+                        spreadRadius: 2,
+                      )
+                    ] : [],
+                  ),
+                  child: Icon(
+                    _isRecordingVoice ? Icons.mic : Icons.mic_none_outlined,
+                    color: _isRecordingVoice ? const Color(0xFFEF4444) : const Color(0xFF818CF8),
+                    size: 36,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Center(
+              child: Text(
+                _isRecordingVoice ? "Release to stop recording" : "Hold button and speak to record phrase",
+                style: TextStyle(
+                  color: _isRecordingVoice ? const Color(0xFFEF4444) : const Color(0xFF71717A),
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(height: 36),
+            
+            // Save Phrase Button
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                onPressed: _saveVoicePhrase,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF6366F1),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  elevation: 0,
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text("Save Code Word", style: TextStyle(fontWeight: FontWeight.bold)),
+                    SizedBox(width: 8),
+                    Icon(Icons.check_circle_outline, size: 16),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
