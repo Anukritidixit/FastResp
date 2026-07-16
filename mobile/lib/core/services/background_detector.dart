@@ -10,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
@@ -38,6 +39,19 @@ void onStart(ServiceInstance service) async {
   bool isCountingDown = false;
   int countdown = 20;
   Timer? countdownTimer;
+
+  bool hasPermissions = false;
+  try {
+    LocationPermission locPermission = await Geolocator.checkPermission();
+    bool hasLoc = locPermission == LocationPermission.always || locPermission == LocationPermission.whileInUse;
+    bool hasMic = await Permission.microphone.isGranted;
+    hasPermissions = hasLoc && hasMic;
+  } catch (_) {}
+
+  if (!hasPermissions) {
+    debugPrint("Background service started but permissions are missing. Exiting initialization.");
+    return;
+  }
 
   // Initialize Speech to Text and Text to Speech
   final SpeechToText speech = SpeechToText();
@@ -125,7 +139,7 @@ void onStart(ServiceInstance service) async {
             final NotificationDetails platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
             
             await flutterLocalNotificationsPlugin.show(
-              id: 888,
+              id: 999,
               title: 'Emergency Phrase Detected!',
               body: 'Are you okay? Automatic SOS in $countdown seconds.',
               notificationDetails: platformChannelSpecifics,
@@ -146,7 +160,7 @@ void onStart(ServiceInstance service) async {
             timer.cancel();
             isCountingDown = false;
             await speech.stop();
-            await flutterLocalNotificationsPlugin.cancel(id: 888);
+            await flutterLocalNotificationsPlugin.cancel(id: 999);
             await triggerSosBackground(
               flutterLocalNotificationsPlugin,
               type: 'voice',
@@ -185,7 +199,7 @@ void onStart(ServiceInstance service) async {
     try {
       await speech.stop();
     } catch (_) {}
-    flutterLocalNotificationsPlugin.cancel(id: 888);
+    flutterLocalNotificationsPlugin.cancel(id: 999);
   });
 
   userAccelerometerEventStream().listen((UserAccelerometerEvent event) async {
@@ -217,7 +231,7 @@ void onStart(ServiceInstance service) async {
           const NotificationDetails platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
           
           await flutterLocalNotificationsPlugin.show(
-            id: 888,
+            id: 999,
             title: 'Possible Accident Detected!',
             body: 'Are you okay? Automatic SOS in $countdown seconds.',
             notificationDetails: platformChannelSpecifics,
@@ -227,7 +241,7 @@ void onStart(ServiceInstance service) async {
         } else {
           timer.cancel();
           isCountingDown = false;
-          await flutterLocalNotificationsPlugin.cancel(id: 888);
+          await flutterLocalNotificationsPlugin.cancel(id: 999);
           await triggerSosBackground(flutterLocalNotificationsPlugin);
         }
       });
@@ -372,7 +386,7 @@ Future<void> initializeBackgroundService() async {
   await service.configure(
     androidConfiguration: AndroidConfiguration(
       onStart: onStart,
-      autoStart: false,
+      autoStart: true,
       isForegroundMode: true,
       notificationChannelId: 'emergency_critical_channel',
       initialNotificationTitle: 'ResQLink Active',
@@ -381,7 +395,7 @@ Future<void> initializeBackgroundService() async {
       foregroundServiceTypes: [AndroidForegroundType.location, AndroidForegroundType.microphone],
     ),
     iosConfiguration: IosConfiguration(
-      autoStart: false,
+      autoStart: true,
       onForeground: onStart,
       onBackground: (ServiceInstance service) {
         return true;

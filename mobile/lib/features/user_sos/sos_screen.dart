@@ -473,6 +473,10 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
       } else {
         timer.cancel();
         _cancelAccidentNotification();
+        setState(() {
+          _simulatingAccident = false;
+          _countdownSeconds = 0;
+        });
         _triggerSos(type: 'impact');
       }
     });
