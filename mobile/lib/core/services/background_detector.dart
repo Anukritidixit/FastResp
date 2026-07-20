@@ -358,6 +358,9 @@ Future<void> triggerSosBackground(FlutterLocalNotificationsPlugin notificationsP
 }
 
 Future<void> initializeBackgroundService() async {
+  final prefs = await SharedPreferences.getInstance();
+  final bool hasGrantedPermissions = prefs.getBool('permissions_granted') ?? false;
+
   final service = FlutterBackgroundService();
 
   const AndroidNotificationChannel channel = AndroidNotificationChannel(
@@ -374,7 +377,7 @@ Future<void> initializeBackgroundService() async {
   await service.configure(
     androidConfiguration: AndroidConfiguration(
       onStart: onStart,
-      autoStart: true,
+      autoStart: hasGrantedPermissions,
       isForegroundMode: true,
       notificationChannelId: 'emergency_critical_channel',
       initialNotificationTitle: 'ResQLink Active',
@@ -383,7 +386,7 @@ Future<void> initializeBackgroundService() async {
       foregroundServiceTypes: [AndroidForegroundType.location, AndroidForegroundType.microphone],
     ),
     iosConfiguration: IosConfiguration(
-      autoStart: true,
+      autoStart: hasGrantedPermissions,
       onForeground: onStart,
       onBackground: (ServiceInstance service) {
         return true;

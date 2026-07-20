@@ -10,6 +10,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../auth/user_session.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/utils/priority_engine.dart';
 
 class SosScreen extends StatefulWidget {
@@ -102,6 +103,8 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
         if (!await service.isRunning()) {
           await service.startService();
         }
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('permissions_granted', true);
       }
     } catch (e) {
       debugPrint("Failed to request permissions or start background service: $e");
