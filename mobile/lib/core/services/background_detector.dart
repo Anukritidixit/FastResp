@@ -10,7 +10,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
@@ -40,18 +39,7 @@ void onStart(ServiceInstance service) async {
   int countdown = 20;
   Timer? countdownTimer;
 
-  bool hasPermissions = false;
-  try {
-    LocationPermission locPermission = await Geolocator.checkPermission();
-    bool hasLoc = locPermission == LocationPermission.always || locPermission == LocationPermission.whileInUse;
-    bool hasMic = await Permission.microphone.isGranted;
-    hasPermissions = hasLoc && hasMic;
-  } catch (_) {}
 
-  if (!hasPermissions) {
-    debugPrint("Background service started but permissions are missing. Exiting initialization.");
-    return;
-  }
 
   // Initialize Speech to Text and Text to Speech
   final SpeechToText speech = SpeechToText();
