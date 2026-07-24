@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 @pragma('vm:entry-point')
@@ -36,12 +39,166 @@ void onStart(ServiceInstance service) async {
   int countdown = 20;
   Timer? countdownTimer;
 
+  // Initialize Speech to Text and Text to Speech
+  final SpeechToText speech = SpeechToText();
+  final FlutterTts tts = FlutterTts();
+  bool speechInitialized = false;
 
+  final List<String> emergencyPhrases = [
+    'help',
+    'help me',
+    'sos',
+    'somebody help',
+    'call the police',
+    'बचाओ',
+    'मदद',
+    'हेल्प',
+    'पुलिस',
+    'मुझे बचाओ',
+    'bachao',
+    'madad',
+    'mujhe bachao'
+  ];
+
+  final List<String> cancelPhrases = [
+    'cancel',
+    'safe',
+    'cancel sos',
+    'stop',
+    'मार्क सेफ'
+  ];
+
+  String? customVoicePhrase;
+
+  void onVoiceResult(String words) async {
+    if (isCountingDown) {
+      for (final p in cancelPhrases) {
+        if (words.toLowerCase().contains(p)) {
+          service.invoke('cancelSOS');
+          await tts.speak("SOS cancelled. You are marked as safe.");
+          break;
+        }
+      }
+      return;
+    }
+
+    final matchPhrases = List<String>.from(emergencyPhrases);
+    if (customVoicePhrase != null && customVoicePhrase!.trim().isNotEmpty) {
+      matchPhrases.add(customVoicePhrase!.trim().toLowerCase());
+    }
+
+    for (final phrase in matchPhrases) {
+      if (words.toLowerCase().contains(phrase)) {
+        isCountingDown = true;
+        countdown = 10;
+
+        try {
+          await speech.stop();
+        } catch (_) {}
+        await tts.speak("Emergency phrase detected. Sending SOS in 10 seconds.");
+
+        countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+          if (countdown > 0) {
+            final AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+              'emergency_critical_channel',
+              'Emergency Alerts',
+              channelDescription: 'Emergency SOS countdown alerts with audio sirens',
+              importance: Importance.max,
+              priority: Priority.high,
+              ticker: 'ticker',
+              playSound: true,
+              onlyAlertOnce: true,
+              sound: const UriAndroidNotificationSound('content://settings/system/alarm_alert'),
+              vibrationPattern: Int64List.fromList([0, 1000, 500, 1000]),
+              actions: const [
+                AndroidNotificationAction('cancel_sos', 'I AM SAFE - CANCEL'),
+              ],
+              ongoing: true,
+            );
+            final NotificationDetails platformChannelSpecifics = NotificationDetails(android: androidPlatformChannelSpecifics);
+            
+            await flutterLocalNotificationsPlugin.show(
+              id: 999,
+              title: 'Emergency Phrase Detected!',
+              body: 'Are you okay? Automatic SOS in $countdown seconds.',
+              notificationDetails: platformChannelSpecifics,
+              payload: 'cancel_sos',
+            );
+
+            countdown--;
+          } else {
+            timer.cancel();
+            isCountingDown = false;
+            try {
+              await speech.stop();
+            } catch (_) {}
+            await flutterLocalNotificationsPlugin.cancel(id: 999);
+            await triggerSosBackground(
+              flutterLocalNotificationsPlugin,
+              type: 'voice',
+              incidentType: 'Voice Activation',
+            );
+          }
+        });
+        break;
+      }
+    }
+  }
+
+  void startListening() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      customVoicePhrase = prefs.getString('custom_voice_sos_phrase');
+    } catch (_) {}
+
+    if (speechInitialized && !isCountingDown && !speech.isListening) {
+      try {
+        await speech.listen(
+          onResult: (res) => onVoiceResult(res.recognizedWords),
+          listenFor: const Duration(seconds: 30),
+          pauseFor: const Duration(seconds: 10),
+          partialResults: true,
+        );
+      } catch (e) {
+        debugPrint("Error starting background speech listen: $e");
+      }
+    }
+  }
+
+  try {
+    speechInitialized = await speech.initialize(
+      onError: (val) {
+        debugPrint('Background Speech Error: $val');
+        Future.delayed(const Duration(seconds: 2), () {
+          startListening();
+        });
+      },
+      onStatus: (status) {
+        debugPrint('Background Speech Status: $status');
+        if (status == 'done' || status == 'notListening') {
+          Future.delayed(const Duration(milliseconds: 500), () {
+            startListening();
+          });
+        }
+      },
+    );
+    if (speechInitialized) {
+      startListening();
+    }
+  } catch (e) {
+    debugPrint("Failed to initialize background SpeechToText: $e");
+  }
 
   service.on('cancelSOS').listen((event) async {
     isCountingDown = false;
     countdownTimer?.cancel();
+    try {
+      await speech.stop();
+    } catch (_) {}
     flutterLocalNotificationsPlugin.cancel(id: 999);
+    Future.delayed(const Duration(seconds: 1), () {
+      startListening();
+    });
   });
 
   userAccelerometerEventStream().listen((UserAccelerometerEvent event) async {

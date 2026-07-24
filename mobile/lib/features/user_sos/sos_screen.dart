@@ -11,7 +11,6 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../auth/user_session.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:speech_to_text/speech_to_text.dart';
 import '../../core/utils/priority_engine.dart';
 
 class SosScreen extends StatefulWidget {
@@ -40,12 +39,6 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
   StreamSubscription<Position>? _positionStreamSubscription;
   StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
 
-  // Speech recognition variables on main isolate
-  final SpeechToText _speech = SpeechToText();
-  bool _speechInitialized = false;
-  Timer? _speechTimer;
-  String? _customVoicePhrase;
-
   final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
 
   @override
@@ -73,7 +66,6 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
 
     // Request permissions preemptively and start background detector service
     _requestPermissionsAndStartBackgroundService();
-    _initSpeechMonitoring();
   }
 
   Future<void> _requestPermissionsAndStartBackgroundService() async {
@@ -124,10 +116,6 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
     _pulseController.dispose();
     _accelerometerSubscription?.cancel();
     _accidentTimer?.cancel();
-    _speechTimer?.cancel();
-    try {
-      _speech.stop();
-    } catch (_) {}
     _unsubscribeFromIncident();
     super.dispose();
   }
@@ -883,67 +871,5 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
         ],
       ),
     );
-  }
-
-  Future<void> _initSpeechMonitoring() async {
-    try {
-      _speechInitialized = await _speech.initialize(
-        onError: (val) => debugPrint('Foreground Speech Error: $val'),
-        onStatus: (val) => debugPrint('Foreground Speech Status: $val'),
-      );
-      if (_speechInitialized) {
-        final prefs = await SharedPreferences.getInstance();
-        _customVoicePhrase = prefs.getString('custom_voice_sos_phrase');
-        _startSpeechListeningLoop();
-      }
-    } catch (e) {
-      debugPrint("Failed to initialize speech monitoring: $e");
-    }
-  }
-
-  void _startSpeechListeningLoop() {
-    _speechTimer?.cancel();
-    _speechTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
-      if (_simulatingAccident || _activeIncident != null || _triggering) return;
-      if (!_speech.isListening) {
-        try {
-          await _speech.listen(
-            onResult: (res) => _onVoicePhraseDetected(res.recognizedWords),
-            listenFor: const Duration(seconds: 4),
-            pauseFor: const Duration(seconds: 2),
-            partialResults: true,
-          );
-        } catch (_) {}
-      }
-    });
-  }
-
-  void _onVoicePhraseDetected(String words) async {
-    final lowerWords = words.toLowerCase();
-    
-    // Check custom phrase
-    final customPhrase = _customVoicePhrase?.toLowerCase().trim() ?? '';
-    bool isTriggered = false;
-
-    if (customPhrase.isNotEmpty && lowerWords.contains(customPhrase)) {
-      isTriggered = true;
-    }
-
-    // Check default phrases
-    final List<String> defaultPhrases = [
-      'help', 'help me', 'sos', 'somebody help', 'बचाओ', 'मदद', 'हेल्प', 'مجھے बचाओ', 'bachao', 'madad'
-    ];
-    for (final phrase in defaultPhrases) {
-      if (lowerWords.contains(phrase)) {
-        isTriggered = true;
-        break;
-      }
-    }
-
-    if (isTriggered) {
-      _speechTimer?.cancel();
-      await _speech.stop();
-      _startAccidentSimulation();
-    }
   }
 }
